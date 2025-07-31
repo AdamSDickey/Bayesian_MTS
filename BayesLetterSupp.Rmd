@@ -1,0 +1,117 @@
+---
+title: "Bayesian Association of MTS with Seizure Freedom"
+author: "Adam Dickey"
+date: "2025-07-21"
+bibliography: references.bib  
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl) #Read Excel file
+library(meta) #Meta-analysis
+library(metafor) #calculate OR for the studies
+library(bayesmeta) #Bayesian  meta-analysis
+fname <- "MTS and seizure freedom.xlsx"
+```
+
+```{r OR, echo=FALSE}
+p1 <- 0.63
+p2 <- 0.42
+or <- (p1/(1-p1))/(p2/(1-p2))
+```
+
+A published meta-analysis of 258 patients found that presence of mesial temporal sclerosis (MTS) predicts better chance of seizure freedom after minimally invasive epilepsy surgery [@kohlhase_comparison_2021]. Here, "seizure freedom" means freedom from disabling seizures, or Engel I outcome. They reported 63% seizure free with MTS and 42% without. The gives an odds ratio of **`r sprintf("%.2f",or)`**.
+
+### Traditional meta-analysis
+I can re-analyze that data to predict the odds ratio directly using the R package "**meta**" (as opposed to calculating the percent seizure free in each group).
+
+
+```{r meta, fig.width=10, fig.height=5, echo=TRUE}
+
+outcome="OR"
+df <- read_excel(fname,sheet="Kohlhase")
+#NORMAL meta-analysis
+m.publ=metabin(Apos, nA, Bpos, nB, data=df, studlab=paste0(Author, " (", Year, ")"), 
+               method.tau = "PM", sm=outcome)
+orMeta <- exp(m.publ$TE.random)
+forest(m.publ,  prediction=TRUE, label.right = paste0("Favors ",df$Aclass[1]), 
+       label.left = paste0("Favors ",df$Bclass[1]))
+
+```
+
+The random effects model gives a similar estimated odds ratio of **`r sprintf("%.2f",orMeta)`**, and the 95% confidence interval excludes an odds ratio of one (no association).
+
+
+### Bayesian meta-analysis
+
+A Bayesian meta-analysis can be performed with the R package "**bayesmeta**" [@rover_using_2023]. The main difference is we now include a prior distribution for how large we expect the odds ratios to be for predicting seizure freedom after epilepsy surgery.  I previously argued for using a normal prior distribution for the log-odds ratio with mean 0 and standard deviation of 0.7 [@dickey_bayesian_2024].  This implies belief that 95% of odds ratios are between 1/4 and 4.
+
+```{r bayesMeta, fig.width=10, fig.height=5, echo=TRUE}
+#Calculate OR for the studies
+es <- escalc(measure="OR",ai=Apos,n1i=nA,ci=Bpos,n2i=nB,slab=Author,data=df)
+
+#Bayesian  meta-analysis
+bmr1 <- bmr(es,beta.prior.mean=0,beta.prior.sd=0.7, 
+            tau.prior =function(t){dhalfnormal(t,s=0.5)})
+forestplot(bmr1,xlab='log-OR')
+```
+```{r, echo=FALSE}
+logOR <-  bmr1$summary[2,2]
+stdev <- bmr1$summary[4,2]
+orBayes <- exp(logOR)
+percCred <-pnorm(0,mean=logOR,sd=stdev,lower.tail=FALSE)
+```
+
+
+Based on the data included in the published meta-analysis, the Bayesian estimate of the log-odds ratio is `r sprintf("%.2f",logOR)`, which corresponds to an odds ratio of **`r sprintf("%.2f",orBayes)`**.  That value is less than traditional meta-analysis, because the prior distribution shrank the estimate towards the null value (odds ratio of one).
+
+The 95% credible interval for the log-odds ratio excludes zero, and we are **`r sprintf("%.1f",percCred*100)`%** sure that the odds ratio is bigger than one.  Based on the Bayesian meta-analysis, we are quite sure that MTS predicts seizure freedom after minimally invasive epilepsy surgery.
+
+### Adding the LAANTERN study
+
+```{r OR2, echo=FALSE}
+p3<- 40/60
+p4 <- 11/25
+or2 <- (p3/(1-p3))/(p4/(1-p4))
+x <- matrix(c(40,20,11,14),nrow=2,ncol=2)
+output <- fisher.test(x)
+
+```
+
+The recently published LAANTERN study reported that 40/60 (66.7%) of patients with MTS were seizure free after minimally invasive epilepsy surgery, compared to 11/25 (44%) of patients without MTS [@landazuri_interstitial_2025].  Those numbers are remarkably similar to the results of the meta-analysis (63% seizure with MTS vs. 42% without).  In fact, the observed odds ratio of **`r sprintf("%.2f",or2)`** is bigger than was observed in either the traditional or Bayesian meta-analysis.  If anything, this data should increase our belief in the predictive value of MTS.
+
+However, using traditional **frequentist** statistics, the observed difference of 40/60 versus 11/25 seizure free is not significant at p < 0.05 (**p = `r sprintf("%.3f",output$p.value)`**, Fisher exact test). We have been taught to "fail to reject the null" and report no association.  Hence, the authors concluded that "MTS was not associated with outcome."
+
+In contrast, a **Bayesian** approach uses the observed data to update our prior belief, which can derive from the published meta-analysis. We can do this by adding the LAANTERN study to our Bayesian meta-analysis.
+
+```{r bayesMeta2, fig.width=10, fig.height=5, echo=TRUE}
+df2 <- read_excel(fname,sheet="Landazuri") #add new study
+
+#Calculate OR for the studies
+es2 <- escalc(measure="OR",ai=Apos,n1i=nA,ci=Bpos,n2i=nB,slab=Author,data=df2)
+
+#Bayesian  meta-analysis
+bmr2 <- bmr(es2,beta.prior.mean=0,beta.prior.sd=0.7, 
+            tau.prior =function(t){dhalfnormal(t,s=0.5)})
+forestplot(bmr2,xlab='Log-Odds Ratio')
+```
+
+```{r, echo=FALSE}
+logOR2 <-  bmr2$summary[2,2]
+stdev2 <- bmr2$summary[4,2]
+orBayes2 <- exp(logOR2)
+percCred2 <-pnorm(0,mean=logOR2,sd=stdev2,lower.tail=FALSE)
+```
+
+
+When the new data is added, the updated Bayesian estimate of the odds ratio is **`r sprintf("%.2f",orBayes2)`**, and we are **`r sprintf("%.1f",percCred2*100)`%** sure that the odds ratio is bigger than one. Thus the newly published LAANTERN study increased the estimate of the odds ratio for MTS predicting seizure freedom, and increased our belief in a positive association.
+
+### Conclusion
+There is stark difference between the frequentist interpretation of no association between MTS and seizure outcome, and the Bayesian interpretation of more than 99% certainty there is a positive association.  It has been argued that traditional frequentist null hypothesis testing does not work well when studying small effects with noisy data, and that Bayesian inference represents a way forward [@gelman_failure_2018]. The expected effect size of most pre-surgical predictors is small (odds ratio ~ 2), and measurement of seizure outcome is noisy.  Therefore, we argue that Bayesian inference provides a better framework for studying predictors of seizure freedom after epilepsy. 
+
+
+### References
+
